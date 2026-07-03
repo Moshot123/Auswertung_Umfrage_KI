@@ -1,0 +1,924 @@
+---
+title: "Auswertung Teamprojekt"
+author: "Moritz , Tom Wegg"
+date: "2026-06-30"
+output: html_document
+---
+
+```{r libraries}
+library(tidyverse)
+library(skimr)
+library(janitor)
+library(psych)
+library(corrplot)
+library(seminr)
+
+# Einheitlicher Blauton für alle ggplot2-Abbildungen
+farbe_blau <- "#2E5F8A"
+farbe_violett <- "#9B8EC4"
+```
+# 1. Datenbetrachtung
+In diesem Block verschaffen wir uns einen kurzen Überblick über die Daten.
+Dabei schauen wir uns die allgemeine Struktur inkl. Variablen und Datenformate an und schauen, ob es irgendwelche unplausiblen Wert in Bezug auf Alter oder Bearbeitungsdauer der Umfrage gibt.
+```{r data observation}
+# ── DATEN EINLESEN ───────────────────────────────────────────────────────────
+df_raw <- read.csv("data_llm-navigator_2026-06-29_11-59.csv",
+                   sep = ";")
+
+
+# ── 1.1 STRUKTURCHECK ────────────────────────────────────────────────────────
+# Anzahl Fälle und Variablen
+dim(df_raw)
+
+# Übersicht der ersten Zeilen
+head(df_raw)
+
+
+# ── 1.2 VOLLSTÄNDIGKEITSCHECK ────────────────────────────────────────────────
+# Welche Variablen haben überhaupt NAs? -> überprüfenl, ob diese relevant sind oder nicht
+df_raw |>
+  summarise(across(everything(), ~sum(is.na(.)))) |>
+  pivot_longer(everything(),
+               names_to  = "variable",
+               values_to = "n_missing") |>
+  filter(n_missing > 0) |>
+  arrange(desc(n_missing))
+
+
+# ── 1.3 AUSFÜLLDAUER-ÜBERBLICK ───────────────────────────────────────────────
+
+df_raw |>
+  summarise(
+    n        = n(),
+    min_sek  = min(TIME_SUM, na.rm = TRUE),
+    med_sek  = median(TIME_SUM, na.rm = TRUE), # Median Antwortdauer in sek
+    max_sek  = max(TIME_SUM, na.rm = TRUE),
+    min_min  = round(min_sek  / 60, 1), # kürzeste Antwortzeit in min (gerundet auf 1 Nachkommastelle)
+    med_min  = round(med_sek  / 60, 1), # Median Antwortdauer in min
+    max_min  = round(max_sek  / 60, 1)
+  )
+
+# Verteilung der Ausfülldauer als Histogramm (in Minuten)
+df_raw |>
+  mutate(dauer_min = TIME_SUM / 60) |>
+  ggplot(aes(x = dauer_min)) +
+  geom_histogram(binwidth = 1, fill = farbe_blau, color = "white") +
+  labs(
+    title    = "Verteilung der Ausfülldauer",
+    subtitle = paste0("N = ", nrow(df_raw), " Teilnehmer"),
+    x        = "Dauer in Minuten",
+    y        = "Anzahl"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"))
+
+
+# ── 1.4 PLAUSIBILITÄTSPRÜFUNG ALTER ─────────────────────────────────────────
+
+# Überblick Alterstruktur
+df_raw |>
+  summarise(
+    n        = sum(!is.na(A202_01)), # Anzahl Umfragteilnehmer
+    min_age  = min(A202_01, na.rm = TRUE), # jüngster Teilnehmer
+    max_age  = max(A202_01, na.rm = TRUE), # ältester Teilnehmer
+    mean_age = round(mean(A202_01, na.rm = TRUE), 1), # Mittelwert Alter
+    median_age = median(A202_01, na.rm = TRUE), # Median Alter
+    sd_age   = round(sd(A202_01, na.rm = TRUE), 1) # Standardabweichung Alter
+  )
+
+# Auffällige Fälle anzeigen (außerhalb 14–100 Jahre, falls existent)
+df_raw |>
+  filter(A202_01 < 14 | A202_01 > 100) |>
+  select(CASE, A202_01)  # gibt die Fallnummer an
+```
+
+# 2. Datenbereinigung
+
+In diesem Block werden drei Ausschlusskriterien nacheinander angewendet: Speeder (zu kurze
+Bearbeitungsdauer), Straightlining (zu geringe Antwortvariabilität) und nicht bestandene
+Attention-Checks. Der Ablauf ist bewusst schrittweise gehalten (`df_step1`, `df_step2`, ...),
+damit jeder Ausschluss einzeln nachvollzogen werden kann. Das Endergebnis ist `df_clean`.
+
+## 2.1 Speeder-Filter
+
+```{r speeder-filter}
+# ── MEDIANDAUER ERMITTELN ────────────────────────────────────────────────────
+median_time  <- median(df_raw$TIME_SUM, na.rm = TRUE)
+schwelle_rel <- median_time / 3   # 1/3 der Mediandauer (in Sekunden)
+schwelle_abs <- 3 * 60            # 3 Minuten in Sekunden
+
+cat("Median Ausfülldauer:      ", round(median_time, 1), "Sekunden (",
+    round(median_time / 60, 1), "Minuten)\n")
+cat("Schwelle 1/3 Mediandauer: ", round(schwelle_rel, 1), "Sekunden\n")
+cat("Schwelle absolut:         ", schwelle_abs, "Sekunden (3 Minuten)\n")
+
+# ── AUFFÄLLIGE FÄLLE SICHTEN ─────────────────────────────────────────────────
+# Alle Fälle, die mindestens eines der beiden Kriterien unterschreiten
+df_raw |>
+  filter(TIME_SUM < schwelle_rel | TIME_SUM < schwelle_abs) |>
+  select(CASE, TIME_SUM) |>
+  arrange(TIME_SUM)
+
+# ── SPEEDER-KRITERIUM ANWENDEN ───────────────────────────────────────────────
+# Speeder = Bearbeitungsdauer < 1/3 Median UND < 3 Minuten (beide Kriterien müssen zutreffen)
+speeder_cases <- df_raw |>
+  filter(TIME_SUM < schwelle_rel & TIME_SUM < schwelle_abs) |>
+  pull(CASE)
+
+cat("\nAnzahl identifizierter Speeder:", length(speeder_cases), "\n")
+
+df_step1 <- df_raw |> filter(!CASE %in% speeder_cases)
+```
+
+## 2.2 Straightlining-Check
+Der Straightlining Check misst, ob bei Seiten der Umfrage (Hauptteil mit den Konstrukten) fast immer die gleiche Antwort angekreuzt wurde. 
+Dabei wird geschaut wie hoch die Standardabweichung pro Seite ist. Ist diese sehr gering (< 0.5) kann das darauf hindeuten, dass der Umfragenteilnehmer einfach ohne aufmerksamens Lesen die gleichen Antworten pro Item angekreuzt hat.
+Dabei haben wir die Items so sortiert wie sie pro Seite randomisiert angezeigt wurden in der Umfrage, um den Straightlining-Check pro Seite durchzuführen.
+```{r straightlining-check}
+
+# ── ITEMS PRO PAGE (ohne SI, BI, AT1, AT2) ───────────────────────────────────
+page_items <- list(
+  page1 = c("IQD1", "SQD1", "PR1", "DIS1", "PI1", "CP1", "HAB1", "AA1"), #Items die auf der ersten Umfragenseite der Konstrukte abgefragt wurden
+  page2 = c("IQD2", "PR2",  "DIS2", "PI2", "CP2", "HAB2", "AA2",  "SN1"),# Items die auf der zweiten Umfragenseite der Konstrukte abgefragt wurden
+  page3 = c("IQD3", "SQD2", "PR3",  "PI3", "CP3", "HAB3", "AA3",  "SN2"),# "
+  page4 = c("IQD4", "SQD3", "PR4",  "DIS3", "CP4", "HAB4", "AA4",  "SN3")# "
+)
+
+# ── SD PRO PERSON UND PRO PAGE BERECHNEN ─────────────────────────────────────
+df_step1 <- df_step1 |>
+  rowwise() |>
+  mutate(
+    sd_page1 = sd(c_across(all_of(page_items$page1)), na.rm = TRUE), # misst standartabweichung der 1. Seite der Konstrukte pro Umfrage
+    sd_page2 = sd(c_across(all_of(page_items$page2)), na.rm = TRUE),
+    sd_page3 = sd(c_across(all_of(page_items$page3)), na.rm = TRUE),
+    sd_page4 = sd(c_across(all_of(page_items$page4)), na.rm = TRUE)
+  ) |>
+  ungroup()
+
+# ── STRAIGHTLINING PRO PAGE FLAGGEN (SD < 0.5) ───────────────────────────────
+df_step1 <- df_step1 |>
+  mutate(
+    straight_page1 = sd_page1 < 0.5,
+    straight_page2 = sd_page2 < 0.5,
+    straight_page3 = sd_page3 < 0.5,
+    straight_page4 = sd_page4 < 0.5,
+    n_pages_straight = straight_page1 + straight_page2 +
+                       straight_page3 + straight_page4
+  )
+
+# ── ÜBERSICHT: WELCHE UMFRAGEN FALLEN AUF WELCHEN PAGES AUF? ─────────────────
+df_step1 |>
+  filter(n_pages_straight > 0) |>
+  select(CASE, sd_page1, sd_page2, sd_page3, sd_page4,
+         straight_page1, straight_page2, straight_page3, straight_page4,
+         n_pages_straight) |>
+  arrange(desc(n_pages_straight))
+
+# ── ZUSAMMENFASSUNG: ANZAHL AUFFÄLLIGER UMFRAGEN PRO PAGE ────────────────────
+cat("Straightliner pro Page (SD < 0.5):\n")
+cat("Page 1:", sum(df_step1$straight_page1), "Umfragen\n")
+cat("Page 2:", sum(df_step1$straight_page2), "Umfragen\n")
+cat("Page 3:", sum(df_step1$straight_page3), "Umfragen\n")
+cat("Page 4:", sum(df_step1$straight_page4), "Umfragen\n")
+cat("Gesamt auffällige Umfragen (mind. 1 Page):",
+    sum(df_step1$n_pages_straight > 0), "\n")
+
+# ── VISUALISIERUNG: SD-VERTEILUNG PRO PAGE ───────────────────────────────────
+df_step1 |>
+  select(CASE, sd_page1, sd_page2, sd_page3, sd_page4) |>
+  pivot_longer(-CASE, names_to = "Page", values_to = "SD") |>
+  mutate(Page = recode(Page,
+    sd_page1 = "Page 1", sd_page2 = "Page 2",
+    sd_page3 = "Page 3", sd_page4 = "Page 4"
+  )) |>
+  ggplot(aes(x = SD)) +
+  geom_histogram(binwidth = 0.1, fill = farbe_blau, color = "white") +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "red") +
+  facet_wrap(~ Page) +
+  labs(
+    title    = "Straightlining-Check: SD pro Person und Page",
+    subtitle = "Rote Linie = Ausschlusskriterium SD < 0.5",
+    x        = "SD pro Person",
+    y        = "Anzahl"
+  ) +
+  theme_minimal(base_size = 13)
+
+# ── AUSSCHLUSS: NUR UMFRAGEN MIT AUFFÄLLIGKEITEN AUF MIND. 2 PAGES ───────────
+# (Schwellenwert anpassen – bei nur 1 Page ggf. noch Zufall)
+straightliner_cases <- df_step1 |>
+  filter(n_pages_straight >= 2) |>
+  pull(CASE)
+
+cat("Ausgeschlossene Fälle (Straightlining auf >= 2 Pages):",
+    length(straightliner_cases), "\n")
+
+df_step2 <- df_step1 |> filter(!CASE %in% straightliner_cases)
+```
+
+## 2.3 Attention-Checks
+
+```{r attention-checks}
+# ── ATTENTION-CHECKS PRÜFEN (AT1 muss 6, AT2 muss 1 sein) ───────────────────
+df_step2 <- df_step2 |>
+  mutate(attention_fail = AT1 != 6 | AT2 != 1)
+
+# ── FÄLLE MIT FEHLGESCHLAGENEM ATTENTION-CHECK SICHTEN ───────────────────────
+df_step2 |>
+  filter(attention_fail) |>
+  select(CASE, AT1, AT2)
+
+attention_fail_cases <- df_step2 |>
+  filter(attention_fail) |>
+  pull(CASE)
+
+cat("Anzahl Fälle mit fehlgeschlagenem Attention-Check:", length(attention_fail_cases), "\n")
+
+# ── BEREINIGTEN DATENSATZ ERZEUGEN ───────────────────────────────────────────
+df_clean <- df_step2 |>
+  filter(!attention_fail) |>
+  select(-sd_page1, -sd_page2, -sd_page3, -sd_page4,
+         -straight_page1, -straight_page2, -straight_page3, -straight_page4,
+         -n_pages_straight, -attention_fail)
+```
+
+## 2.4 Zusammenfassung der Bereinigung
+
+```{r cleaning-summary}
+cat("Rohdatensatz:                       N =", nrow(df_raw), "\n")
+cat("Ausgeschlossen (Speeder):           n =", length(speeder_cases), "\n")
+cat("Ausgeschlossen (Straightliner):     n =", length(straightliner_cases), "\n")
+cat("Ausgeschlossen (Attention-Checks):  n =", length(attention_fail_cases), "\n")
+cat("Bereinigter Datensatz (df_clean):   N =", nrow(df_clean), "\n")
+```
+
+# 3. Deskriptive Statistik
+
+## 3.1 Demographie
+
+```{r demographie-geschlecht}
+# ── GESCHLECHT (A201) ────────────────────────────────────────────────────────
+# Klartext-Labels der Skala: 1 = männlich, 2 = weiblich, 3 = divers, 4 = keine Angabe
+geschlecht_labels <- c("männlich", "weiblich", "divers", "keine Angabe")
+df_clean <- df_clean |>
+  mutate(A201_geschlecht = factor(A201, levels = 1:4, labels = geschlecht_labels))
+
+df_clean |>
+  count(A201_geschlecht) |>
+  mutate(Anteil_Prozent = round(100 * n / sum(n), 1))
+
+ggplot(df_clean, aes(x = A201_geschlecht)) +
+  geom_bar(fill = farbe_blau) +
+  labs(title = "Geschlechterverteilung", x = "Geschlecht", y = "Anzahl") +
+  theme_minimal(base_size = 13)
+```
+
+```{r demographie-alter}
+# ── ALTER (A202_01) ──────────────────────────────────────────────────────────
+df_clean |>
+  summarise(
+    n      = n(),
+    min    = min(A202_01, na.rm = TRUE),
+    max    = max(A202_01, na.rm = TRUE),
+    mean   = round(mean(A202_01, na.rm = TRUE), 1),
+    median = round(median(A202_01, na.rm = TRUE), 1),
+    sd     = round(sd(A202_01, na.rm = TRUE), 1),
+    median = median(A202_01, na.rm = TRUE)
+  )
+
+ggplot(df_clean, aes(x = A202_01)) +
+  geom_histogram(binwidth = 2, fill = farbe_blau, color = "white") +
+  labs(title = "Altersverteilung", x = "Alter (Jahre)", y = "Anzahl") +
+  theme_minimal(base_size = 13)
+```
+
+```{r demographie-ki-tools}
+# ── GENUTZTE KI-TOOLS (A203_01–A203_11, binär: 1 = nicht gewählt, 2 = gewählt) ─
+tool_labels <- c("ChatGPT", "Claude", "Copilot", "DeepSeek", "Gemini", "Grok",
+                  "Meta AI", "Mistral AI", "NotebookLM", "Perplexity AI", "Sonstiges")
+tool_vars <- paste0("A203_", sprintf("%02d", 1:11))
+
+ki_tools_long <- df_clean |>
+  select(CASE, all_of(tool_vars)) |>
+  pivot_longer(-CASE, names_to = "tool_var", values_to = "code") |>
+  mutate(
+    tool     = factor(tool_var, levels = tool_vars, labels = tool_labels),
+    gewaehlt = code == 2
+  )
+
+ki_tools_summary <- ki_tools_long |>
+  group_by(tool) |>
+  summarise(
+    n_gewaehlt     = sum(gewaehlt, na.rm = TRUE),
+    anteil_prozent = round(100 * mean(gewaehlt, na.rm = TRUE), 1)
+  ) |>
+  arrange(desc(n_gewaehlt))
+
+ki_tools_summary
+
+ggplot(ki_tools_summary, aes(x = reorder(tool, n_gewaehlt), y = n_gewaehlt)) +
+  geom_col(fill = farbe_blau) +
+  coord_flip() +
+  labs(
+    title = "Genutzte KI-Tools (Mehrfachnennung möglich)",
+    x = NULL, y = "Anzahl Nennungen"
+  ) +
+  theme_minimal(base_size = 13)
+
+# KI-Tools die bei "Sonstiges" genannt wurden 
+df_clean |>
+  filter(!is.na(A203_11a)) |>
+  count(A203_11a, sort = TRUE)
+
+```
+
+```{r demographie-meistgenutztes-tool}
+# ── AKTUELL MEISTGENUTZTES TOOL (A204, Codes 1–11 = gleiche Reihenfolge wie A203) ─ BAlKENDIAGRAMM
+df_clean <- df_clean |>
+  mutate(A204_tool = factor(A204, levels = 1:11, labels = tool_labels))
+
+df_clean |>
+  count(A204_tool) |>
+  mutate(Anteil_Prozent = round(100 * n / sum(n), 1)) |>
+  arrange(desc(n))
+
+ggplot(df_clean, aes(x = fct_infreq(A204_tool))) +
+  geom_bar(fill = farbe_blau) +
+  coord_flip() +
+  labs(title = "Aktuell meistgenutztes KI-Tool", x = NULL, y = "Anzahl") +
+  theme_minimal(base_size = 13)
+
+# ── PIE CHART ─────────────────────────────────────────────────────────────────
+pie_data <- df_clean |>
+  count(A204_tool) |>
+  mutate(pct   = round(100 * n / sum(n), 1),
+         label = paste0(pct, "%"))
+
+ggplot(pie_data, aes(x = "", y = pct, fill = A204_tool)) +
+  geom_col(width = 1, color = "white", linewidth = 0.5) +
+  coord_polar(theta = "y") +
+  geom_text(
+    aes(label = ifelse(pct >= 3, label, "")),  # kleine Segmente nicht beschriften
+    position = position_stack(vjust = 0.5),
+    size = 3.5, fontface = "bold", color = "white"
+  ) +
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(
+    title    = "Aktuell meistgenutztes KI-Tool",
+    subtitle = paste0("N = ", sum(pie_data$n), " Befragte"),
+    fill     = "KI-Tool",
+    x = NULL, y = NULL
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "grey50"),
+    legend.position = "right"
+  )
+
+# Gibt die meistgenutzten KI-Tools an, die bei "Sonstiges" genannt wurden
+df_clean |>
+  filter(!is.na(A204_11)) |>
+  count(A204_11, sort = TRUE)
+```
+
+```{r demographie-erfahrung-nutzung}
+# ── ALLG. KI-ERFAHRUNG (A205), TOOL-ERFAHRUNG (A206), NUTZUNGSHÄUFIGKEIT (A207),
+#    HAUPTNUTZUNGSZWECK (A208) ─────────────────────────────────────────────────
+
+# Klartext-Labels der Skalen KI-Erfahrung, Nutzungshäufigkeit und -zweck
+experience_labels <- c("< 3 Monate", "3-6 Monate", "6 Monate - 1 Jahr", "1-2 Jahre", "> 2 Jahre")
+frequency_labels <- c("1x monatlich", "1x wöchentlich", "Mehrmals wöchentlich", "1x täglich", "Mehrmals täglich")
+purpose_labels <- c("Privat", "Arbeit", "Schule/Uni")
+
+df_clean <- df_clean |>
+  mutate(A205_aiexperience_allg = factor(A205, levels = 1:5, labels = experience_labels)) %>% #neue Variable mit den Klartextlabels
+  mutate(A206_aiexperience_curr = factor(A206, levels = 1:5, labels = experience_labels)) %>%
+  mutate(A207_aifrequency = factor(A207, levels = 1:5, labels = frequency_labels)) %>%
+  mutate(A208_aipurpose = factor(A208, levels = 1:3, labels = purpose_labels))
+  
+ # absolute Häufigkeiten bestimmen 
+df_clean |> count(A205_aiexperience_allg) 
+df_clean |> count(A206_aiexperience_curr)
+df_clean |> count(A207_aifrequency)
+df_clean |> count(A208_aipurpose)
+
+demo_long <- df_clean |>
+  select(CASE, A205_aiexperience_allg, A206_aiexperience_curr, A207_aifrequency, A208_aipurpose) |>
+  # umbenennen der Überschriften Variablen für die Überschriften der Plots
+  rename(
+    "KI-Erfahrung (allgemein)"      = A205_aiexperience_allg,
+    "KI-Erfahrung (aktuelles Tool)" = A206_aiexperience_curr,
+    "Nutzungshäufigkeit"            = A207_aifrequency,
+    "Hauptnutzungszweck"            = A208_aipurpose
+  ) |>
+  pivot_longer(-CASE, names_to = "Variable", values_to = "Code") |>
+  # Anordnungsreihenfolge festlegen
+  mutate(Variable = factor(Variable, levels = c(
+    "KI-Erfahrung (allgemein)",
+    "KI-Erfahrung (aktuelles Tool)",
+    "Nutzungshäufigkeit",
+    "Hauptnutzungszweck"
+  )))
+
+ggplot(demo_long, aes(x = factor(Code))) +
+  geom_bar(fill = farbe_violett) +
+  facet_wrap(~ Variable, scales = "free_x") +
+  labs(
+    title = "KI-Erfahrung, Tool-Erfahrung, Nutzungshäufigkeit, Hauptnutzungszweck",
+    x = "Code", y = "Anzahl"
+  ) +
+  theme_minimal(base_size = 6)
+```
+
+## 3.2 Cronbachs Alpha
+
+```{r construct-items}
+# ── ITEMS JE KONSTRUKT DEFINIEREN (wird auch in Block 4 & 5 wiederverwendet) ──
+construct_items <- list(
+  IQD = c("IQD1", "IQD2", "IQD3", "IQD4"),
+  SQD = c("SQD1", "SQD2", "SQD3"),
+  PR  = c("PR1",  "PR2",  "PR3",  "PR4"),
+  DIS = c("DIS1", "DIS2", "DIS3"),
+  PI  = c("PI1",  "PI2",  "PI3"),
+  CP  = c("CP1",  "CP2",  "CP3",  "CP4"),
+  HAB = c("HAB1", "HAB2", "HAB3", "HAB4"),
+  AA  = c("AA1",  "AA2",  "AA3",  "AA4"),
+  SN  = c("SN1",  "SN2",  "SN3"),
+  SI  = c("SI1",  "SI2",  "SI3"),
+  BI  = c("BI1",  "BI2",  "BI3")
+)
+construct_names <- names(construct_items)
+```
+
+```{r cronbach-alpha}
+# check.keys = TRUE lässt psych::alpha() invers gepolte Items automatisch erkennen und umpolen
+alpha_results <- map(construct_items, ~ psych::alpha(df_clean[, .x], check.keys = TRUE))
+
+alpha_table <- tibble(
+  Konstrukt       = construct_names,
+  n_Items         = map_int(construct_items, length),
+  Cronbachs_Alpha = map_dbl(alpha_results, ~ round(.x$total$raw_alpha, 3))
+)
+
+alpha_table
+```
+## 3.2.1 Items aus Konstrukten entfernen
+Sofern manche Konstrukte sehr niedrige Cronbachs Alpha Werte aufweisen, müssen ggf. Items entfernt werden die diese Werte stark beeinflussen.
+```{r}
+
+```
+
+
+## 3.3 Skalenmittelwerte
+
+```{r skalenmittelwerte}
+# ── SKALENMITTELWERT JE KONSTRUKT ÜBER rowMeans() ────────────────────────────
+for (konstrukt in construct_names) {
+  df_clean[[konstrukt]] <- rowMeans(df_clean[, construct_items[[konstrukt]]], na.rm = TRUE)
+}
+
+df_clean |> select(CASE, all_of(construct_names)) |> head()
+```
+
+## 3.4 Verteilungskennwerte der Konstrukte
+
+```{r describe-tabelle}
+# ── MITTELWERT, SD, SCHIEFE, KURTOSIS JE KONSTRUKT ───────────────────────────
+describe_table <- psych::describe(df_clean[, construct_names]) |>
+  as.data.frame() |>
+  rownames_to_column("Konstrukt") |>
+  select(Konstrukt, n, mean, sd, skew, kurtosis) |>
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+describe_table
+```
+
+## 3.5 Korrelationsmatrix der Konstrukte
+
+```{r korrelationsmatrix, fig.width=8, fig.height=8}
+cor_matrix <- cor(df_clean[, construct_names], use = "pairwise.complete.obs")
+
+corrplot::corrplot(
+  cor_matrix,
+  method      = "color",
+  type        = "upper",
+  diag        = FALSE,
+  tl.col      = "black",
+  tl.srt      = 45,
+  addCoef.col = "black",
+  number.cex  = 0.7,
+  col         = colorRampPalette(c("white", "#E07B39"))(200)
+)
+```
+
+## 3.6 Boxplots und Violinplots aller Konstrukte
+
+```{r box-violin-plots, fig.width=10}
+df_long_constructs <- df_clean |>
+  select(CASE, all_of(construct_names)) |>
+  pivot_longer(-CASE, names_to = "Konstrukt", values_to = "Wert") |>
+  mutate(Konstrukt = factor(Konstrukt, levels = construct_names))
+
+ggplot(df_long_constructs, aes(x = Konstrukt, y = Wert)) +
+  geom_boxplot(fill = "#9B8EC4", alpha = 0.7) +
+  labs(title = "Boxplots aller Konstrukte", x = NULL, y = "Skalenmittelwert") +
+  theme_minimal(base_size = 13)
+
+ggplot(df_long_constructs, aes(x = Konstrukt, y = Wert)) +
+  geom_violin(fill = "#9B8EC4", alpha = 0.7, trim = FALSE) +
+  labs(title = "Violinplots aller Konstrukte", x = NULL, y = "Skalenmittelwert") +
+  theme_minimal(base_size = 13)
+```
+
+## 3.7 Gruppenvergleiche
+
+```{r gruppenvergleich-geschlecht, fig.width=10}
+# ── KONSTRUKT-MITTELWERTE NACH GESCHLECHT (A201) ─────────────────────────────
+n_geschlecht <- n_distinct(df_clean$A201_geschlecht)
+blues_geschlecht <- colorRampPalette(c("#16324F", farbe_blau, "#B7D3EA"))(n_geschlecht)
+
+df_long_gender <- df_clean |>
+  select(CASE, A201_geschlecht, all_of(construct_names)) |>
+  pivot_longer(-c(CASE, A201_geschlecht), names_to = "Konstrukt", values_to = "Wert") |>
+  mutate(Konstrukt = factor(Konstrukt, levels = construct_names))
+
+ggplot(df_long_gender, aes(x = Konstrukt, y = Wert, fill = A201_geschlecht)) +
+  geom_boxplot() +
+  scale_fill_manual(values = blues_geschlecht, name = "Geschlecht") +
+  labs(title = "Konstrukt-Mittelwerte nach Geschlecht", x = NULL, y = "Skalenmittelwert") +
+  theme_minimal(base_size = 13)
+
+mean_by_gender <- df_clean |>
+  group_by(A201_geschlecht) |>
+  summarise(across(all_of(construct_names), ~ round(mean(.x, na.rm = TRUE), 2)), n = n())
+
+mean_by_gender
+```
+
+```{r gruppenvergleich-tool, fig.width=12}
+# ── KONSTRUKT-MITTELWERTE NACH MEISTGENUTZTEM TOOL (A204) ────────────────────
+n_tools <- n_distinct(df_clean$A204_tool)
+blues_n <- colorRampPalette(c("#16324F", farbe_blau, "#B7D3EA"))(n_tools)
+
+df_long_tool <- df_clean |>
+  select(CASE, A204_tool, all_of(construct_names)) |>
+  pivot_longer(-c(CASE, A204_tool), names_to = "Konstrukt", values_to = "Wert") |>
+  mutate(Konstrukt = factor(Konstrukt, levels = construct_names))
+
+ggplot(df_long_tool, aes(x = Konstrukt, y = Wert, fill = A204_tool)) +
+  geom_boxplot() +
+  scale_fill_manual(values = blues_n, name = "meistgenutztes Tool (A204)") +
+  labs(title = "Konstrukt-Mittelwerte nach meistgenutztem KI-Tool", x = NULL, y = "Skalenmittelwert") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+mean_by_tool <- df_clean |>
+  group_by(A204_tool) |>
+  summarise(across(all_of(construct_names), ~ round(mean(.x, na.rm = TRUE), 2)), n = n())
+
+mean_by_tool
+```
+
+# 4. Messmodell-Checks (PLS-SEM-Vorbereitung)
+
+Alle Konstrukte werden reflektiv spezifiziert und mit `seminr::estimate_pls()` geschätzt.
+Anschließend werden die zentralen Gütekriterien für reflektive Messmodelle abgerufen:
+Faktorladungen, Indikatorreliabilität, Composite Reliability (CR), Average Variance Extracted
+(AVE), HTMT-Ratio und das Fornell-Larcker-Kriterium.
+
+```{r messmodell-spezifikation}
+# ── MESSMODELL: ALLE KONSTRUKTE REFLEKTIV ────────────────────────────────────
+measurement_model <- constructs(
+  reflective("IQD", multi_items("IQD", 1:4)),
+  reflective("SQD", multi_items("SQD", 1:3)),
+  reflective("PR",  multi_items("PR",  1:4)),
+  reflective("DIS", multi_items("DIS", 1:3)),
+  reflective("PI",  multi_items("PI",  1:3)),
+  reflective("CP",  multi_items("CP",  1:4)),
+  reflective("HAB", multi_items("HAB", 1:4)),
+  reflective("AA",  multi_items("AA",  1:4)),
+  reflective("SN",  multi_items("SN",  1:3)),
+  reflective("SI",  multi_items("SI",  1:3)),
+  reflective("BI",  multi_items("BI",  1:3))
+)
+
+# ── STRUKTURMODELL GEMÄSS PUSH-PULL-MOORING-RAHMEN (für Messmodell-Checks
+#    ohne Interaktionsterme, da diese für die Gütekriterien nicht benötigt werden) ─
+structural_model_basic <- relationships(
+  paths(from = c("IQD", "SQD", "PR"), to = "DIS"),
+  paths(from = c("DIS", "PI", "CP", "HAB", "AA", "SN"), to = "SI"),
+  paths(from = "SI", to = "BI")
+)
+
+pls_measurement <- estimate_pls(
+  data              = df_clean,
+  measurement_model = measurement_model,
+  structural_model  = structural_model_basic
+)
+
+summary_measurement <- summary(pls_measurement)
+```
+
+```{r outer-loadings}
+# ── FAKTORLADUNGEN (OUTER LOADINGS) JE ITEM AUF SEIN EIGENES KONSTRUKT ───────
+outer_loadings <- summary_measurement$loadings
+
+own_loadings <- map_dfr(construct_names, function(k) {
+  tibble(
+    Konstrukt = k,
+    Item      = construct_items[[k]],
+    Loading   = outer_loadings[construct_items[[k]], k]
+  )
+}) |>
+  mutate(
+    Indikatorreliabilitaet = round(Loading^2, 3),  # Indikatorreliabilität = quadrierte Ladung
+    Loading                = round(Loading, 3)
+  )
+
+own_loadings
+```
+
+```{r cr-ave}
+# ── COMPOSITE RELIABILITY (CR) UND AVE ───────────────────────────────────────
+reliability_table <- summary_measurement$reliability |>
+  as.data.frame() |>
+  rownames_to_column("Konstrukt") |>
+  rename(Cronbachs_Alpha = alpha, rhoA = rhoA, CR = rhoC, AVE = AVE) |>
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+reliability_table
+```
+
+```{r htmt}
+# ── HTMT-RATIO (Diskriminanzvalidität, sollte < 0.85 bzw. < 0.90 liegen) ─────
+htmt_table <- round(summary_measurement$validity$htmt, 3)
+htmt_table
+```
+
+```{r fornell-larcker}
+# ── FORNELL-LARCKER-KRITERIUM (Diagonale = Wurzel der AVE) ───────────────────
+fl_table <- round(summary_measurement$validity$fl_criteria, 3)
+fl_table
+```
+
+```{r messmodell-guete-hinweis}
+# ── AUTOMATISCHER HINWEIS BEI GÜTEKRITERIEN-VERLETZUNGEN ─────────────────────
+reliability_flags <- reliability_table |> filter(CR < 0.7 | AVE < 0.5)
+
+if (nrow(reliability_flags) > 0) {
+  cat("Hinweis: Folgende Konstrukte unterschreiten die empfohlenen Gütekriterien",
+      "(CR >= .70, AVE >= .50) und sollten hinsichtlich der Itemqualität",
+      "(z. B. inkonsistent gepolte/invertierte Items) überprüft werden, bevor die",
+      "Strukturmodellergebnisse aus Block 5 inhaltlich interpretiert werden:\n\n")
+  print(reliability_flags)
+} else {
+  cat("Alle Konstrukte erfüllen die Gütekriterien für Reliabilität und Konvergenzvalidität.\n")
+}
+```
+
+# 5. PLS-SEM
+
+Das Strukturmodell folgt dem Push-Pull-Mooring-Rahmen: IQD, SQD und PR wirken auf DIS
+(Dissatisfaction/"Push"), DIS, PI, CP, HAB, AA und SN wirken auf SI (Switching Intention,
+"Pull"/"Mooring"), und SI wirkt auf BI (Behavioral Intention). Die allgemeine KI-Erfahrung
+(A205) wird als Moderator für alle sechs Pfade auf SI spezifiziert: DIS→SI (H5a), PI→SI (H5b),
+CP→SI (H5c), HAB→SI (H5d), AA→SI (H5e) und SN→SI (H5f). Da A205 ein Einzelitem ist, wird es als
+Single-Item-Konstrukt (`composite()` mit `single_item()`) modelliert – dem in `seminr`
+vorgesehenen Standardvorgehen für Moderatoren, die nur aus einer einzelnen Variable bestehen.
+Wichtig: Ein Moderator muss im Strukturmodell immer zusätzlich zu den Interaktionstermen als
+eigener Haupteffekt-Pfad spezifiziert werden (hier `EXP -> SI`) – fehlt dieser Haupteffekt,
+bricht die interne f²-Berechnung von `seminr` mit einem "subscript out of bounds"-Fehler ab,
+da die Pfadkoeffizienten-Matrix dann keine Zeile für den Moderator enthält.
+
+## 5.1 Strukturmodell und Moderator spezifizieren
+
+```{r sm-full-mit-moderation}
+measurement_model_mod <- constructs(
+  reflective("IQD", multi_items("IQD", 1:4)),
+  reflective("SQD", multi_items("SQD", 1:3)),
+  reflective("PR",  multi_items("PR",  1:4)),
+  reflective("DIS", multi_items("DIS", 1:3)),
+  reflective("PI",  multi_items("PI",  1:3)),
+  reflective("CP",  multi_items("CP",  1:4)),
+  reflective("HAB", multi_items("HAB", 1:4)),
+  reflective("AA",  multi_items("AA",  1:4)),
+  reflective("SN",  multi_items("SN",  1:3)),
+  reflective("SI",  multi_items("SI",  1:3)),
+  reflective("BI",  multi_items("BI",  1:3)),
+  composite("EXP", single_item("A205")),                                # Moderator: KI-Erfahrung
+  interaction_term(iv = "DIS", moderator = "EXP", method = orthogonal), # H5a
+  interaction_term(iv = "PI",  moderator = "EXP", method = orthogonal), # H5b
+  interaction_term(iv = "CP",  moderator = "EXP", method = orthogonal), # H5c
+  interaction_term(iv = "HAB", moderator = "EXP", method = orthogonal), # H5d
+  interaction_term(iv = "AA",  moderator = "EXP", method = orthogonal), # H5e
+  interaction_term(iv = "SN",  moderator = "EXP", method = orthogonal)  # H5f
+)
+
+structural_model <- relationships(
+  paths(from = c("IQD", "SQD", "PR"), to = "DIS"),
+  paths(from = c("DIS", "PI", "CP", "HAB", "AA", "SN", "EXP",
+                  "DIS*EXP", "PI*EXP", "CP*EXP", "HAB*EXP", "AA*EXP", "SN*EXP"), to = "SI"),
+  paths(from = "SI", to = "BI")
+)
+```
+
+## 5.2 PLS-Algorithmus und Bootstrapping
+
+```{r pls-schaetzen}
+pls_model <- estimate_pls(
+  data              = df_clean,
+  measurement_model = measurement_model_mod,
+  structural_model  = structural_model
+)
+
+summary_pls <- summary(pls_model)
+summary_pls$paths
+```
+
+```{r bootstrapping, cache=TRUE}
+# ── BOOTSTRAPPING MIT 5000 WIEDERHOLUNGEN ────────────────────────────────────
+set.seed(42)
+boot_model <- bootstrap_model(
+  seminr_model = pls_model,
+  nboot        = 5000,
+  cores        = max(1, parallel::detectCores() - 1),
+  seed         = 42
+)
+
+summary_boot <- summary(boot_model, alpha = 0.05)
+```
+
+## 5.3 Pfadkoeffizienten, t-Werte, p-Werte, R² und f²
+
+```{r pfadkoeffizienten}
+# ── PFADKOEFFIZIENTEN (β), T-WERTE, P-WERTE AUS DEM BOOTSTRAPPING ───────────
+path_coefficients <- summary_boot$bootstrapped_paths |>
+  as.data.frame() |>
+  rownames_to_column("Pfad") |>
+  rename(
+    Beta   = `Original Est.`,
+    t_Wert = `T Stat.`,
+    p_Wert = `Bootstrap P Val`
+  ) |>
+  select(Pfad, Beta, t_Wert, p_Wert) |>
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+path_coefficients
+```
+
+```{r r-quadrat}
+# ── R² UND ADJUSTIERTES R² JE ENDOGENEM KONSTRUKT ────────────────────────────
+r2_table <- tibble(
+  Konstrukt = colnames(summary_pls$paths),
+  R2        = round(as.numeric(summary_pls$paths["R^2", ]), 3),
+  AdjR2     = round(as.numeric(summary_pls$paths["AdjR^2", ]), 3)
+)
+
+r2_table
+```
+
+```{r f-quadrat}
+# ── EFFEKTGRÖSSE f² JE STRUKTURPFAD ──────────────────────────────────────────
+f2_pairs <- tribble(
+  ~Praediktor, ~Kriterium,
+  "IQD",       "DIS",
+  "SQD",       "DIS",
+  "PR",        "DIS",
+  "DIS",       "SI",
+  "PI",        "SI",
+  "CP",        "SI",
+  "HAB",       "SI",
+  "AA",        "SI",
+  "SN",        "SI",
+  "EXP",       "SI",
+  "DIS*EXP",   "SI",
+  "PI*EXP",    "SI",
+  "CP*EXP",    "SI",
+  "HAB*EXP",   "SI",
+  "AA*EXP",    "SI",
+  "SN*EXP",    "SI",
+  "SI",        "BI"
+)
+
+f2_table <- f2_pairs |>
+  rowwise() |>
+  mutate(f2 = round(summary_pls$fSquare[Praediktor, Kriterium], 3)) |>
+  ungroup()
+
+f2_table
+```
+
+```{r strukturmodell-guete-hinweis}
+# ── AUTOMATISCHER HINWEIS BEI UNPLAUSIBLEN R²/f²-WERTEN ─────────────────────
+# seminr schätzt reflektive Modelle standardmäßig als PLSc (konsistente PLS,
+# Dijkstra, 2015), bei der Konstruktkorrelationen anhand der Reliabilität
+# disattenuiert werden. Bei sehr niedriger Composite Reliability (siehe Block 4)
+# kann diese Korrektur instabile bzw. unzulässige Werte (R² außerhalb [0,1],
+# negative f²) erzeugen. Das ist ein inhaltlicher Hinweis auf Messmodellprobleme,
+# keine Fehlberechnung.
+implausible_r2 <- r2_table |> filter(R2 < 0 | R2 > 1)
+
+if (nrow(implausible_r2) > 0) {
+  cat("Hinweis: Für", paste(implausible_r2$Konstrukt, collapse = ", "),
+      "liegt R² außerhalb des zulässigen Bereichs [0,1]. Dies deutet auf",
+      "Messmodellprobleme bei den beteiligten Prädiktorkonstrukten hin",
+      "(vgl. CR/AVE-Verletzungen in Block 4). Vor einer inhaltlichen Interpretation",
+      "sollten die betroffenen Konstrukte/Items überprüft werden",
+      "(z. B. invers gepolte/inkonsistente Items).\n")
+}
+```
+
+## 5.4 Hypothesen-Ergebnistabelle
+
+```{r hypothesentabelle}
+hypothesis_table <- tribble(
+  ~Hypothese, ~Pfad,
+  "H5a",  "IQD  ->  DIS",
+  "H5b",  "SQD  ->  DIS",
+  "H5c",  "PR  ->  DIS",
+  "H1", "DIS  ->  SI",
+  "H3", "PI  ->  SI",
+  "H4", "CP  ->  SI",
+  "H5", "HAB  ->  SI",
+  "H2a", "AA  ->  SI",
+  "H2b", "SN  ->  SI",
+  "H6a", "DIS*EXP  ->  SI",
+  "H6b", "PI*EXP  ->  SI",
+  "H6c", "CP*EXP  ->  SI",
+  "H6d", "HAB*EXP  ->  SI",
+  "H6e", "AA*EXP  ->  SI",
+  "H6f", "SN*EXP  ->  SI",
+  "H7",  "SI  ->  BI"
+) |>
+  left_join(path_coefficients, by = "Pfad") |>
+  mutate(Unterstuetzt = ifelse(p_Wert < 0.05, "Ja", "Nein"))
+
+hypothesis_table
+```
+
+## 5.5 Moderationsanalyse: KI-Erfahrung (EXP)
+
+Die formalen Signifikanztests für die Moderationseffekte (H5a–H5f) sind Teil der
+Hypothesentabelle oben (Pfade `DIS*EXP -> SI`, `PI*EXP -> SI`, `CP*EXP -> SI`,
+`HAB*EXP -> SI`, `AA*EXP -> SI`, `SN*EXP -> SI`). Zur inhaltlichen Illustration wird
+zusätzlich ein Mediansplit der KI-Erfahrung (A205) in "niedrige" vs. "hohe KI-Erfahrung"
+visualisiert (nur zur Veranschaulichung – der statistische Test selbst erfolgt kontinuierlich
+über den orthogonalen Interaktionsterm).
+
+```{r moderation-illustration, fig.width=8}
+df_clean <- df_clean |>
+  mutate(EXP_gruppe = ifelse(A205 <= median(A205, na.rm = TRUE),
+                              "niedrige KI-Erfahrung", "hohe KI-Erfahrung"))
+
+moderation_plot <- function(prediktor, ziel, titel) {
+  ggplot(df_clean, aes(x = .data[[prediktor]], y = .data[[ziel]], color = EXP_gruppe)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm", se = FALSE) +
+    scale_color_manual(values = c(
+      "hohe KI-Erfahrung"     = "#2E5F8A",
+      "niedrige KI-Erfahrung" = "#9CC1E0"
+    )) +
+    labs(title = titel, x = paste(prediktor, "(Skalenmittelwert)"),
+         y = paste(ziel, "(Skalenmittelwert)"), color = "KI-Erfahrung (A205)") +
+    theme_minimal(base_size = 13)
+}
+
+moderations_illustration <- tribble(
+  ~Praediktor, ~Hypothese,
+  "DIS", "H5a",
+  "PI",  "H5b",
+  "CP",  "H5c",
+  "HAB", "H5d",
+  "AA",  "H5e",
+  "SN",  "H5f"
+)
+
+for (i in seq_len(nrow(moderations_illustration))) {
+  prad  <- moderations_illustration$Praediktor[i]
+  hypo  <- moderations_illustration$Hypothese[i]
+  titel <- paste0("Moderationseffekt ", hypo, ": ", prad, " -> SI nach KI-Erfahrung")
+  print(moderation_plot(prad, "SI", titel))
+}
+```
+
+## 5.6 Pfaddiagramm
+
+```{r pfaddiagramm, fig.width=10, fig.height=8}
+# Hinweis: seminr_theme_create() akzeptiert für Knoten-/Kantenfarben nur benannte
+# R-Farben (grDevices::colors()), keine Hex-Codes. "steelblue4" ist die dem
+# einheitlichen Blauton (#2E5F8A) am nächsten liegende benannte Farbe.
+pfad_theme <- seminr_theme_create(
+  mm.node.fill              = "steelblue4",
+  mm.node.label.fontcolor   = "white",
+  sm.node.fill              = "steelblue4",
+  sm.node.label.fontcolor   = "white",
+  sm.edge.positive.color    = "steelblue4",
+  sm.edge.negative.color    = "firebrick",
+  mm.edge.boot.show_p_stars = TRUE,
+  sm.edge.boot.show_p_stars = TRUE,
+  sm.edge.label.all_betas   = TRUE
+)
+
+plot(boot_model, theme = pfad_theme,
+     title = "PLS-SEM Strukturmodell mit Pfadkoeffizienten und Signifikanzkennzeichnung")
+```
