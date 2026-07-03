@@ -131,7 +131,7 @@ df_step1 <- df_raw |> filter(!CASE %in% speeder_cases)
 ```
 
 ## 2.2 Straightlining-Check
-Der Straightlining Check misst, ob bei Seiten der Umfrage (Hauptteil mit den Konstrukten) fast immer die gleiche Antwort angekreuzt wurde. 
+Der Straightlining Check misst, ob bei Seiten der Umfrage (Hauptteil mit den Konstrukten, Seiten 3-6 in Soscisurvey) fast immer die gleiche Antwort angekreuzt wurde. 
 Dabei wird geschaut wie hoch die Standardabweichung pro Seite ist. Ist diese sehr gering (< 0.5) kann das darauf hindeuten, dass der Umfragenteilnehmer einfach ohne aufmerksamens Lesen die gleichen Antworten pro Item angekreuzt hat.
 Dabei haben wir die Items so sortiert wie sie pro Seite randomisiert angezeigt wurden in der Umfrage, um den Straightlining-Check pro Seite durchzuführen.
 ```{r straightlining-check}
@@ -218,7 +218,7 @@ df_step2 <- df_step1 |> filter(!CASE %in% straightliner_cases)
 ## 2.3 Attention-Checks
 
 ```{r attention-checks}
-# ── ATTENTION-CHECKS PRÜFEN (AT1 muss 6, AT2 muss 1 sein) ───────────────────
+# ── ATTENTION-CHECKS PRÜFEN (AT1 muss Wert 6, AT2 Wert 1 haben) ───────────────────
 df_step2 <- df_step2 |>
   mutate(attention_fail = AT1 != 6 | AT2 != 1)
 
@@ -450,6 +450,7 @@ construct_items <- list(
 construct_names <- names(construct_items)
 ```
 
+Diese Übersicht gibt für jedes Konstrukt die Itemanzahl und Cronbachs Alpha Werte an.
 ```{r cronbach-alpha}
 # check.keys = TRUE lässt psych::alpha() invers gepolte Items automatisch erkennen und umpolen
 alpha_results <- map(construct_items, ~ psych::alpha(df_clean[, .x], check.keys = TRUE))
@@ -706,18 +707,16 @@ measurement_model_mod <- constructs(
   reflective("SI",  multi_items("SI",  1:3)),
   reflective("BI",  multi_items("BI",  1:3)),
   composite("EXP", single_item("A205")),                                # Moderator: KI-Erfahrung
-  interaction_term(iv = "DIS", moderator = "EXP", method = orthogonal), # H5a
-  interaction_term(iv = "PI",  moderator = "EXP", method = orthogonal), # H5b
-  interaction_term(iv = "CP",  moderator = "EXP", method = orthogonal), # H5c
-  interaction_term(iv = "HAB", moderator = "EXP", method = orthogonal), # H5d
-  interaction_term(iv = "AA",  moderator = "EXP", method = orthogonal), # H5e
-  interaction_term(iv = "SN",  moderator = "EXP", method = orthogonal)  # H5f
+  interaction_term(iv = "DIS", moderator = "EXP", method = orthogonal), # H6a
+  interaction_term(iv = "HAB", moderator = "EXP", method = orthogonal), # H6b
+  interaction_term(iv = "AA",  moderator = "EXP", method = orthogonal), # H6c
+  interaction_term(iv = "SN",  moderator = "EXP", method = orthogonal)  # H6d
 )
 
 structural_model <- relationships(
   paths(from = c("IQD", "SQD", "PR"), to = "DIS"),
   paths(from = c("DIS", "PI", "CP", "HAB", "AA", "SN", "EXP",
-                  "DIS*EXP", "PI*EXP", "CP*EXP", "HAB*EXP", "AA*EXP", "SN*EXP"), to = "SI"),
+                  "DIS*EXP", "HAB*EXP", "AA*EXP", "SN*EXP"), to = "SI"),
   paths(from = "SI", to = "BI")
 )
 ```
@@ -790,10 +789,8 @@ f2_pairs <- tribble(
   "HAB",       "SI",
   "AA",        "SI",
   "SN",        "SI",
-  "EXP",       "SI",
+  "EXP",       "SI", #Experience als Moderator
   "DIS*EXP",   "SI",
-  "PI*EXP",    "SI",
-  "CP*EXP",    "SI",
   "HAB*EXP",   "SI",
   "AA*EXP",    "SI",
   "SN*EXP",    "SI",
@@ -843,11 +840,9 @@ hypothesis_table <- tribble(
   "H2a", "AA  ->  SI",
   "H2b", "SN  ->  SI",
   "H6a", "DIS*EXP  ->  SI",
-  "H6b", "PI*EXP  ->  SI",
-  "H6c", "CP*EXP  ->  SI",
-  "H6d", "HAB*EXP  ->  SI",
-  "H6e", "AA*EXP  ->  SI",
-  "H6f", "SN*EXP  ->  SI",
+  "H6b", "HAB*EXP  ->  SI",
+  "H6c", "AA*EXP  ->  SI",
+  "H6d", "SN*EXP  ->  SI",
   "H7",  "SI  ->  BI"
 ) |>
   left_join(path_coefficients, by = "Pfad") |>
@@ -885,12 +880,10 @@ moderation_plot <- function(prediktor, ziel, titel) {
 
 moderations_illustration <- tribble(
   ~Praediktor, ~Hypothese,
-  "DIS", "H5a",
-  "PI",  "H5b",
-  "CP",  "H5c",
-  "HAB", "H5d",
-  "AA",  "H5e",
-  "SN",  "H5f"
+  "DIS", "H6a",
+  "HAB", "H6b",
+  "AA",  "H6c",
+  "SN",  "H6d"
 )
 
 for (i in seq_len(nrow(moderations_illustration))) {
