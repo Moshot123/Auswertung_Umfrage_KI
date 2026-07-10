@@ -35,7 +35,7 @@ head(df_raw)
 
 
 # ── 1.2 VOLLSTÄNDIGKEITSCHECK ────────────────────────────────────────────────
-# Welche Variablen haben überhaupt NAs? -> überprüfenl, ob diese relevant sind oder nicht
+# Welche Variablen haben überhaupt NAs (NAs = unerwartet fehlende Werte) ? -> überprüfenl, ob diese relevant sind oder nicht
 df_raw |>
   summarise(across(everything(), ~sum(is.na(.)))) |>
   pivot_longer(everything(),
@@ -131,7 +131,7 @@ df_step1 <- df_raw |> filter(!CASE %in% speeder_cases)
 ```
 
 ## 2.2 Straightlining-Check
-Der Straightlining Check misst, ob bei Seiten der Umfrage (Hauptteil mit den Konstrukten, Seiten 3-6 in Soscisurvey) fast immer die gleiche Antwort angekreuzt wurde. 
+Der Straightlining Check misst, ob bei den Seiten der Umfrage (Hauptteil mit den Konstrukten, Seiten 3-6 in Soscisurvey) fast immer die gleiche Antwort angekreuzt wurde. 
 Dabei wird geschaut wie hoch die Standardabweichung pro Seite ist. Ist diese sehr gering (< 0.5) kann das darauf hindeuten, dass der Umfragenteilnehmer einfach ohne aufmerksamens Lesen die gleichen Antworten pro Item angekreuzt hat.
 Dabei haben wir die Items so sortiert wie sie pro Seite randomisiert angezeigt wurden in der Umfrage, um den Straightlining-Check pro Seite durchzuführen.
 ```{r straightlining-check}
