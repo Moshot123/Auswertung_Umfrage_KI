@@ -682,8 +682,8 @@ if (nrow(reliability_flags) > 0) {
 Das Strukturmodell folgt dem Push-Pull-Mooring-Rahmen: IQD, SQD und PR wirken auf DIS
 (Dissatisfaction/"Push"), DIS, PI, CP, HAB, AA und SN wirken auf SI (Switching Intention,
 "Pull"/"Mooring"), und SI wirkt auf BI (Behavioral Intention). Die allgemeine KI-Erfahrung
-(A205) wird als Moderator für alle sechs Pfade auf SI spezifiziert: DIS→SI (H5a), PI→SI (H5b),
-CP→SI (H5c), HAB→SI (H5d), AA→SI (H5e) und SN→SI (H5f). Da A205 ein Einzelitem ist, wird es als
+(A205) wird als Moderator für alle sechs Pfade auf SI spezifiziert: DIS→SI (H6a), HAB→SI (H6b),
+AA→SI (H6c), SN→SI (H6d), PI→SI (H6e) und CP→SI (H6f). Da A205 ein Einzelitem ist, wird es als
 Single-Item-Konstrukt (`composite()` mit `single_item()`) modelliert – dem in `seminr`
 vorgesehenen Standardvorgehen für Moderatoren, die nur aus einer einzelnen Variable bestehen.
 Wichtig: Ein Moderator muss im Strukturmodell immer zusätzlich zu den Interaktionstermen als
@@ -710,13 +710,16 @@ measurement_model_mod <- constructs(
   interaction_term(iv = "DIS", moderator = "EXP", method = orthogonal), # H6a
   interaction_term(iv = "HAB", moderator = "EXP", method = orthogonal), # H6b
   interaction_term(iv = "AA",  moderator = "EXP", method = orthogonal), # H6c
-  interaction_term(iv = "SN",  moderator = "EXP", method = orthogonal)  # H6d
+  interaction_term(iv = "SN",  moderator = "EXP", method = orthogonal), # H6d
+  interaction_term(iv = "PI",  moderator = "EXP", method = orthogonal), # H6e
+  interaction_term(iv = "CP",  moderator = "EXP", method = orthogonal)  # H6f
 )
 
 structural_model <- relationships(
   paths(from = c("IQD", "SQD", "PR"), to = "DIS"),
   paths(from = c("DIS", "PI", "CP", "HAB", "AA", "SN", "EXP",
-                  "DIS*EXP", "HAB*EXP", "AA*EXP", "SN*EXP"), to = "SI"),
+                  "DIS*EXP", "HAB*EXP", "AA*EXP", "SN*EXP",
+                  "PI*EXP", "CP*EXP"), to = "SI"),
   paths(from = "SI", to = "BI")
 )
 ```
@@ -794,6 +797,8 @@ f2_pairs <- tribble(
   "HAB*EXP",   "SI",
   "AA*EXP",    "SI",
   "SN*EXP",    "SI",
+  "PI*EXP",    "SI",
+  "CP*EXP",    "SI",
   "SI",        "BI"
 )
 
@@ -843,6 +848,8 @@ hypothesis_table <- tribble(
   "H6b", "HAB*EXP  ->  SI",
   "H6c", "AA*EXP  ->  SI",
   "H6d", "SN*EXP  ->  SI",
+  "H6e", "PI*EXP  ->  SI",
+  "H6f", "CP*EXP  ->  SI",
   "H7",  "SI  ->  BI"
 ) |>
   left_join(path_coefficients, by = "Pfad") |>
@@ -853,7 +860,7 @@ hypothesis_table
 
 ## 5.5 Moderationsanalyse: KI-Erfahrung (EXP)
 
-Die formalen Signifikanztests für die Moderationseffekte (H5a–H5f) sind Teil der
+Die formalen Signifikanztests für die Moderationseffekte (H6a–H6f) sind Teil der
 Hypothesentabelle oben (Pfade `DIS*EXP -> SI`, `PI*EXP -> SI`, `CP*EXP -> SI`,
 `HAB*EXP -> SI`, `AA*EXP -> SI`, `SN*EXP -> SI`). Zur inhaltlichen Illustration wird
 zusätzlich ein Mediansplit der KI-Erfahrung (A205) in "niedrige" vs. "hohe KI-Erfahrung"
@@ -883,7 +890,9 @@ moderations_illustration <- tribble(
   "DIS", "H6a",
   "HAB", "H6b",
   "AA",  "H6c",
-  "SN",  "H6d"
+  "SN",  "H6d",
+  "PI",  "H6e",
+  "CP",  "H6f"
 )
 
 for (i in seq_len(nrow(moderations_illustration))) {
