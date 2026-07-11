@@ -22,7 +22,7 @@ In diesem Block verschaffen wir uns einen kurzen Überblick über die Daten.
 Dabei schauen wir uns die allgemeine Struktur inkl. Variablen und Datenformate an und schauen, ob es irgendwelche unplausiblen Wert in Bezug auf Alter oder Bearbeitungsdauer der Umfrage gibt.
 ```{r data observation}
 # ── DATEN EINLESEN ───────────────────────────────────────────────────────────
-df_raw <- read.csv("data_llm-navigator_2026-06-29_11-59.csv",
+df_raw <- read.csv("data_llm-navigator_2026-07-10_18-46.csv",
                    sep = ";")
 
 
@@ -536,7 +536,7 @@ ggplot(df_long_constructs, aes(x = Konstrukt, y = Wert)) +
 ```{r gruppenvergleich-geschlecht, fig.width=10}
 # ── KONSTRUKT-MITTELWERTE NACH GESCHLECHT (A201) ─────────────────────────────
 n_geschlecht <- n_distinct(df_clean$A201_geschlecht)
-blues_geschlecht <- colorRampPalette(c("#16324F", farbe_blau, "#B7D3EA"))(n_geschlecht)
+blues_geschlecht <- colorRampPalette(c(farbe_blau, "#B7D3EA"))(n_geschlecht)
 
 df_long_gender <- df_clean |>
   select(CASE, A201_geschlecht, all_of(construct_names)) |>
@@ -558,9 +558,6 @@ mean_by_gender
 
 ```{r gruppenvergleich-tool, fig.width=12}
 # ── KONSTRUKT-MITTELWERTE NACH MEISTGENUTZTEM TOOL (A204) ────────────────────
-n_tools <- n_distinct(df_clean$A204_tool)
-blues_n <- colorRampPalette(c("#16324F", farbe_blau, "#B7D3EA"))(n_tools)
-
 df_long_tool <- df_clean |>
   select(CASE, A204_tool, all_of(construct_names)) |>
   pivot_longer(-c(CASE, A204_tool), names_to = "Konstrukt", values_to = "Wert") |>
@@ -568,7 +565,7 @@ df_long_tool <- df_clean |>
 
 ggplot(df_long_tool, aes(x = Konstrukt, y = Wert, fill = A204_tool)) +
   geom_boxplot() +
-  scale_fill_manual(values = blues_n, name = "meistgenutztes Tool (A204)") +
+  scale_fill_brewer(palette = "Blues", name = "meistgenutztes Tool (A204)") +
   labs(title = "Konstrukt-Mittelwerte nach meistgenutztem KI-Tool", x = NULL, y = "Skalenmittelwert") +
   theme_minimal(base_size = 13) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -743,7 +740,7 @@ set.seed(42)
 boot_model <- bootstrap_model(
   seminr_model = pls_model,
   nboot        = 5000,
-  cores        = max(1, parallel::detectCores() - 1),
+  cores        = 1,
   seed         = 42
 )
 
