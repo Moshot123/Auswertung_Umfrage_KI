@@ -436,7 +436,7 @@ ggplot(demo_long, aes(x = factor(Code))) +
 ```{r construct-items}
 # ── ITEMS JE KONSTRUKT DEFINIEREN (wird auch in Block 4 & 5 wiederverwendet) ──
 construct_items <- list(
-  IQD = c("IQD1", "IQD3", "IQD4"), # IQD2 entfernt: AVE stieg von 0.436 auf 0.488 (CR bleibt > 0.70)
+  IQD = c("IQD1", "IQD3", "IQD4"), # IQD2 entfernt: AVE stieg von 0.433 auf 0.482 (CR bleibt > 0.70, 0.724)
   SQD = c("SQD1", "SQD2", "SQD3"),
   PR  = c("PR1",  "PR2",  "PR3",  "PR4"),
   DIS = c("DIS1", "DIS2", "DIS3"),
@@ -680,9 +680,9 @@ if (nrow(reliability_flags) > 0) {
 Vor der obigen Berechnung wurden zwei Items aus ihren Konstrukten entfernt, da sie die Reliabilität stark beeinträchtigten (siehe Kommentare bei `construct_items` in Block 3.2 sowie im Messmodell in diesem und dem folgenden Block):
 
 - **HAB4** korrelierte kaum mit HAB1–HAB3 (r < 0,1) und drückte die Composite Reliability von HAB auf CR = 0,002. Nach Entfernung erfüllt HAB die Gütekriterien und taucht oben nicht mehr in der Hinweis-Liste auf.
-- **IQD2** senkte die Average Variance Extracted (AVE) von IQD auf 0,433. Nach Entfernung steigt AVE auf ca. 0,49, während die Composite Reliability weiterhin klar über dem Grenzwert von 0,70 liegt.
+- **IQD2** senkte die Average Variance Extracted (AVE) von IQD auf 0,433. Nach Entfernung steigt AVE auf 0,482, während die Composite Reliability weiterhin klar über dem Grenzwert von 0,70 liegt (CR = 0,724).
 
-**IQD und CP** unterschreiten die AVE-Grenze von 0,50 zwar weiterhin knapp, gelten aber nach **Fornell & Larcker (1981)** dennoch als ausreichend valide: Liegt die Composite Reliability klar über 0,70 (IQD: CR = 0,744; CP: CR = 0,772), kompensiert dies ein nur geringfügig unter 0,50 liegendes AVE (IQD: 0,49; CP: 0,49).
+**IQD und CP** unterschreiten die AVE-Grenze von 0,50 zwar weiterhin knapp, gelten aber nach **Fornell & Larcker (1981)** dennoch als ausreichend valide: Liegt die Composite Reliability klar über 0,70 (IQD: CR = 0,724; CP: CR = 0,772), kompensiert dies ein nur geringfügig unter 0,50 liegendes AVE (IQD: 0,48; CP: 0,49).
 
 **SQD, DIS und PI** bleiben demgegenüber als echte Limitationen bestehen: Bei SQD und DIS unterschreiten sowohl CR als auch AVE die Grenzwerte deutlich (generell schwache Itemkorrelationen; bei nur drei Items je Konstrukt ist eine weitere Item-Entfernung nicht sinnvoll möglich). Bei PI liegt die Ursache nicht in den Items selbst – isoliert betrachtet erfüllen PI1–PI3 die Gütekriterien deutlich –, sondern vermutlich in der hohen Zahl an Prädiktoren auf SI (13 Pfade bei vergleichsweise kleiner Stichprobe), die die PLS-Schätzung destabilisiert. Diese drei Konstrukte sollten bei der Interpretation der Strukturmodellergebnisse aus Block 5 entsprechend vorsichtig behandelt werden.
 
@@ -747,17 +747,30 @@ summary_pls$paths
 ```
 
 ```{r bootstrapping, cache=TRUE}
-# ── BOOTSTRAPPING MIT 5000 WIEDERHOLUNGEN ────────────────────────────────────
+# ── BOOTSTRAPPING MIT 1000 WIEDERHOLUNGEN ────────────────────────────────────
+# nboot auf 1000 reduziert (statt 5000): Bei 5000 Wiederholungen bricht die
+# Berechnung mit einem Fehler ab, da bei diesem instabilen Modell (siehe
+# Hinweistext zu Block 4) ein sehr hoher Anteil der Wiederholungen nicht
+# konvergiert. 1000 Wiederholungen sind in der PLS-SEM-Literatur ebenfalls
+# ein anerkannter Standardwert und laufen bei diesem Modell nachweislich
+# stabil durch.
 set.seed(42)
 boot_model <- bootstrap_model(
   seminr_model = pls_model,
-  nboot        = 5000,
+  nboot        = 1000,
   cores        = 1,
   seed         = 42
 )
 
 summary_boot <- summary(boot_model, alpha = 0.05)
 ```
+
+**Hinweis zur Konvergenzquote:** Bei diesem Bootstrapping konvergierten nur ca. 40–45%
+der 1000 Wiederholungen; nicht-konvergierte Iterationen wurden von `seminr` automatisch
+ausgeschlossen. Dies ist ein weiterer konkreter Beleg für die in Block 4 beschriebene
+Instabilität des Strukturmodells (vermutlich bedingt durch die hohe Zahl an – teils
+korrelierten – Prädiktoren auf SI bei vergleichsweise kleiner Stichprobe) und sollte bei
+der Interpretation der Pfadkoeffizienten berücksichtigt werden.
 
 ## 5.3 Pfadkoeffizienten, t-Werte, p-Werte, R² und f²
 
@@ -866,6 +879,15 @@ hypothesis_table <- tribble(
 
 hypothesis_table
 ```
+
+**Anmerkung zu den Moderationseffekten:** Keine der sechs Moderationshypothesen (H6a–H6f)
+ist statistisch signifikant (p-Werte zwischen 0,44 und 0,94). In Kombination mit der oben
+dokumentierten Konvergenzproblematik beim Bootstrapping (nur ca. 40–45% konvergierte
+Wiederholungen) ist dies ein weiteres Indiz für die Überparametrisierung des Strukturmodells
+(13 Prädiktoren auf SI bei kleiner Stichprobe). Aus diesem Grund ist als nächster Schritt
+geplant, in einem separaten, schlankeren Modell die Moderationspfade (EXP und alle sechs
+Interaktionsterme) vollständig herauszunehmen und zu prüfen, ob sich die Stabilität der
+Schätzung sowie die Aussagekraft der verbleibenden Haupteffekt-Pfade dadurch verbessert.
 
 ## 5.5 Moderationsanalyse: KI-Erfahrung (EXP)
 
