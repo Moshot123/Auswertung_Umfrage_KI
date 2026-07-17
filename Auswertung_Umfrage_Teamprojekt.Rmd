@@ -12,6 +12,7 @@ library(janitor)
 library(psych)
 library(corrplot)
 library(seminr)
+library(ggpattern)
 
 # Einheitlicher Blauton für alle ggplot2-Abbildungen
 farbe_blau <- "#2E5F8A"
@@ -873,23 +874,57 @@ Hypothesentabelle oben (Pfade `DIS*EXP -> SI`, `PI*EXP -> SI`, `CP*EXP -> SI`,
 `HAB*EXP -> SI`, `AA*EXP -> SI`, `SN*EXP -> SI`). Zur inhaltlichen Illustration wird
 zusätzlich ein Mediansplit der KI-Erfahrung (A205) in "niedrige" vs. "hohe KI-Erfahrung"
 visualisiert (nur zur Veranschaulichung – der statistische Test selbst erfolgt kontinuierlich
-über den orthogonalen Interaktionsterm).
+über den orthogonalen Interaktionsterm). Das Konfidenzband um die Regressionsgeraden ist
+**schraffiert dargestellt, wenn der zugehörige Moderationseffekt signifikant ist**
+(p < 0.05 laut Hypothesentabelle), sonst als einfaches transparentes Band – so ist auf
+einen Blick erkennbar, welche der sechs Moderationen tatsächlich statistisch abgesichert sind.
 
 ```{r moderation-illustration, fig.width=8}
 df_clean <- df_clean |>
   mutate(EXP_gruppe = ifelse(A205 < median(A205, na.rm = TRUE),
                               "niedrige KI-Erfahrung", "hohe KI-Erfahrung"))
 
-moderation_plot <- function(prediktor, ziel, titel) {
-  ggplot(df_clean, aes(x = .data[[prediktor]], y = .data[[ziel]], color = EXP_gruppe)) +
-    geom_point(alpha = 0.6) +
-    geom_smooth(method = "lm", se = FALSE) +
-    scale_color_manual(values = c(
-      "hohe KI-Erfahrung"     = "#2E5F8A",
-      "niedrige KI-Erfahrung" = "#9CC1E0"
-    )) +
+farben_exp <- c("hohe KI-Erfahrung" = "#2E5F8A", "niedrige KI-Erfahrung" = "#9CC1E0")
+
+moderation_plot <- function(prediktor, ziel, titel, signifikant) {
+  # ── Regressionsgerade + Konfidenzband je Gruppe manuell berechnen ────────────
+  fit_data <- df_clean |>
+    group_by(EXP_gruppe) |>
+    reframe({
+      modell <- lm(reformulate(prediktor, ziel), data = pick(everything()))
+      x_seq  <- seq(min(.data[[prediktor]], na.rm = TRUE),
+                     max(.data[[prediktor]], na.rm = TRUE), length.out = 50)
+      neu    <- setNames(data.frame(x_seq), prediktor)
+      vorhersage <- predict(modell, newdata = neu, interval = "confidence")
+      tibble(x = x_seq, y = vorhersage[, "fit"],
+             ymin = vorhersage[, "lwr"], ymax = vorhersage[, "upr"])
+    })
+
+  p <- ggplot() +
+    geom_point(data = df_clean,
+               aes(x = .data[[prediktor]], y = .data[[ziel]], color = EXP_gruppe),
+               alpha = 0.6)
+
+  if (signifikant) {
+    p <- p + geom_ribbon_pattern(
+      data = fit_data, aes(x = x, ymin = ymin, ymax = ymax,
+                            fill = EXP_gruppe, pattern_fill = EXP_gruppe),
+      alpha = 0.25, pattern = "stripe", pattern_density = 0.15,
+      pattern_spacing = 0.02, pattern_angle = 45, color = NA, show.legend = FALSE
+    )
+  } else {
+    p <- p + geom_ribbon(
+      data = fit_data, aes(x = x, ymin = ymin, ymax = ymax, fill = EXP_gruppe),
+      alpha = 0.15, color = NA, show.legend = FALSE
+    )
+  }
+
+  p +
+    geom_line(data = fit_data, aes(x = x, y = y, color = EXP_gruppe), linewidth = 1) +
+    scale_color_manual(values = farben_exp, name = "KI-Erfahrung (A205)") +
+    scale_fill_manual(values = farben_exp, guide = "none") +
     labs(title = titel, x = paste(prediktor, "(Skalenmittelwert)"),
-         y = paste(ziel, "(Skalenmittelwert)"), color = "KI-Erfahrung (A205)") +
+         y = paste(ziel, "(Skalenmittelwert)")) +
     theme_minimal(base_size = 13)
 }
 
@@ -906,8 +941,10 @@ moderations_illustration <- tribble(
 for (i in seq_len(nrow(moderations_illustration))) {
   prad  <- moderations_illustration$Praediktor[i]
   hypo  <- moderations_illustration$Hypothese[i]
-  titel <- paste0("Moderationseffekt ", hypo, ": ", prad, " -> SI nach KI-Erfahrung")
-  print(moderation_plot(prad, "SI", titel))
+  sig   <- (hypothesis_table |> filter(Hypothese == hypo) |> pull(p_Wert)) < 0.05
+  titel <- paste0("Moderationseffekt ", hypo, ": ", prad, " -> SI nach KI-Erfahrung",
+                   ifelse(sig, " (signifikant)", ""))
+  print(moderation_plot(prad, "SI", titel, sig))
 }
 ```
 
