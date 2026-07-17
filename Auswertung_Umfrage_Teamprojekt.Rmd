@@ -435,13 +435,13 @@ ggplot(demo_long, aes(x = factor(Code))) +
 ```{r construct-items}
 # ── ITEMS JE KONSTRUKT DEFINIEREN (wird auch in Block 4 & 5 wiederverwendet) ──
 construct_items <- list(
-  IQD = c("IQD1", "IQD2", "IQD3", "IQD4"),
+  IQD = c("IQD1", "IQD3", "IQD4"), # IQD2 entfernt: AVE stieg von 0.436 auf 0.488 (CR bleibt > 0.70)
   SQD = c("SQD1", "SQD2", "SQD3"),
   PR  = c("PR1",  "PR2",  "PR3",  "PR4"),
   DIS = c("DIS1", "DIS2", "DIS3"),
   PI  = c("PI1",  "PI2",  "PI3"),
   CP  = c("CP1",  "CP2",  "CP3",  "CP4"),
-  HAB = c("HAB1", "HAB2", "HAB3", "HAB4"),
+  HAB = c("HAB1", "HAB2", "HAB3"), # HAB4 entfernt: korreliert kaum mit HAB1-3 (r < 0.1), druckte CR auf 0.002
   AA  = c("AA1",  "AA2",  "AA3",  "AA4"),
   SN  = c("SN1",  "SN2",  "SN3"),
   SI  = c("SI1",  "SI2",  "SI3"),
@@ -587,13 +587,13 @@ Faktorladungen, Indikatorreliabilität, Composite Reliability (CR), Average Vari
 ```{r messmodell-spezifikation}
 # ── MESSMODELL: ALLE KONSTRUKTE REFLEKTIV ────────────────────────────────────
 measurement_model <- constructs(
-  reflective("IQD", multi_items("IQD", 1:4)),
+  reflective("IQD", multi_items("IQD", c(1, 3, 4))),
   reflective("SQD", multi_items("SQD", 1:3)),
   reflective("PR",  multi_items("PR",  1:4)),
   reflective("DIS", multi_items("DIS", 1:3)),
   reflective("PI",  multi_items("PI",  1:3)),
   reflective("CP",  multi_items("CP",  1:4)),
-  reflective("HAB", multi_items("HAB", 1:4)),
+  reflective("HAB", multi_items("HAB", 1:3)),
   reflective("AA",  multi_items("AA",  1:4)),
   reflective("SN",  multi_items("SN",  1:3)),
   reflective("SI",  multi_items("SI",  1:3)),
@@ -674,6 +674,17 @@ if (nrow(reliability_flags) > 0) {
 }
 ```
 
+**Anmerkung zu den vorgenommenen Item-Anpassungen:**
+
+Vor der obigen Berechnung wurden zwei Items aus ihren Konstrukten entfernt, da sie die Reliabilität stark beeinträchtigten (siehe Kommentare bei `construct_items` in Block 3.2 sowie im Messmodell in diesem und dem folgenden Block):
+
+- **HAB4** korrelierte kaum mit HAB1–HAB3 (r < 0,1) und drückte die Composite Reliability von HAB auf CR = 0,002. Nach Entfernung erfüllt HAB die Gütekriterien und taucht oben nicht mehr in der Hinweis-Liste auf.
+- **IQD2** senkte die Average Variance Extracted (AVE) von IQD auf 0,433. Nach Entfernung steigt AVE auf ca. 0,49, während die Composite Reliability weiterhin klar über dem Grenzwert von 0,70 liegt.
+
+**IQD und CP** unterschreiten die AVE-Grenze von 0,50 zwar weiterhin knapp, gelten aber nach **Fornell & Larcker (1981)** dennoch als ausreichend valide: Liegt die Composite Reliability klar über 0,70 (IQD: CR = 0,744; CP: CR = 0,772), kompensiert dies ein nur geringfügig unter 0,50 liegendes AVE (IQD: 0,49; CP: 0,49).
+
+**SQD, DIS und PI** bleiben demgegenüber als echte Limitationen bestehen: Bei SQD und DIS unterschreiten sowohl CR als auch AVE die Grenzwerte deutlich (generell schwache Itemkorrelationen; bei nur drei Items je Konstrukt ist eine weitere Item-Entfernung nicht sinnvoll möglich). Bei PI liegt die Ursache nicht in den Items selbst – isoliert betrachtet erfüllen PI1–PI3 die Gütekriterien deutlich –, sondern vermutlich in der hohen Zahl an Prädiktoren auf SI (13 Pfade bei vergleichsweise kleiner Stichprobe), die die PLS-Schätzung destabilisiert. Diese drei Konstrukte sollten bei der Interpretation der Strukturmodellergebnisse aus Block 5 entsprechend vorsichtig behandelt werden.
+
 # 5. PLS-SEM
 
 Das Strukturmodell folgt dem Push-Pull-Mooring-Rahmen: IQD, SQD und PR wirken auf DIS
@@ -692,13 +703,13 @@ da die Pfadkoeffizienten-Matrix dann keine Zeile für den Moderator enthält.
 
 ```{r sm-full-mit-moderation}
 measurement_model_mod <- constructs(
-  reflective("IQD", multi_items("IQD", 1:4)),
+  reflective("IQD", multi_items("IQD", c(1, 3, 4))),
   reflective("SQD", multi_items("SQD", 1:3)),
   reflective("PR",  multi_items("PR",  1:4)),
   reflective("DIS", multi_items("DIS", 1:3)),
   reflective("PI",  multi_items("PI",  1:3)),
   reflective("CP",  multi_items("CP",  1:4)),
-  reflective("HAB", multi_items("HAB", 1:4)),
+  reflective("HAB", multi_items("HAB", 1:3)),
   reflective("AA",  multi_items("AA",  1:4)),
   reflective("SN",  multi_items("SN",  1:3)),
   reflective("SI",  multi_items("SI",  1:3)),
@@ -866,7 +877,7 @@ visualisiert (nur zur Veranschaulichung – der statistische Test selbst erfolgt
 
 ```{r moderation-illustration, fig.width=8}
 df_clean <- df_clean |>
-  mutate(EXP_gruppe = ifelse(A205 <= median(A205, na.rm = TRUE),
+  mutate(EXP_gruppe = ifelse(A205 < median(A205, na.rm = TRUE),
                               "niedrige KI-Erfahrung", "hohe KI-Erfahrung"))
 
 moderation_plot <- function(prediktor, ziel, titel) {
