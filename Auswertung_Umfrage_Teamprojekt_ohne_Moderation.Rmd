@@ -1,9 +1,17 @@
 ---
-title: "Auswertung Teamprojekt"
+title: "Auswertung Teamprojekt – ohne Moderation"
 author: "Moritz , Tom Wegg"
 date: "2026-06-30"
 output: html_document
 ---
+
+**Hinweis zu dieser Datei:** Diese Version des Modells wurde zusätzlich zur ursprünglichen
+Version (`Auswertung_Umfrage_Teamprojekt.Rmd`) erstellt, weil sich dort zwei Dinge zeigten:
+(1) Das Strukturmodell war beim Bootstrapping durch die hohe Anzahl an Prädiktoren (13 auf
+SI) instabil, und (2) keiner der sechs Moderationseffekte (KI-Erfahrung als Moderator) war
+statistisch signifikant. Diese Version prüft, ob das vollständige Entfernen der Moderation
+(Konstrukt „KI-Erfahrung" sowie alle sechs Interaktionsterme) die Stabilität der Schätzung
+verbessert – siehe Anmerkung am Ende von Block 4.
 
 ```{r libraries}
 library(tidyverse)
@@ -12,7 +20,6 @@ library(janitor)
 library(psych)
 library(corrplot)
 library(seminr)
-library(ggpattern)
 
 # Einheitlicher Blauton für alle ggplot2-Abbildungen
 farbe_blau <- "#2E5F8A"
@@ -132,7 +139,7 @@ df_step1 <- df_raw |> filter(!CASE %in% speeder_cases)
 ```
 
 ## 2.2 Straightlining-Check
-Der Straightlining Check misst, ob bei den Seiten der Umfrage (Hauptteil mit den Konstrukten, Seiten 3-6 in Soscisurvey) fast immer die gleiche Antwort angekreuzt wurde. 
+Der Straightlining Check misst, ob bei den Seiten der Umfrage (Hauptteil mit den Konstrukten, Seiten 3-6 in Soscisurvey) fast immer die gleiche Antwort angekreuzt wurde.
 Dabei wird geschaut wie hoch die Standardabweichung pro Seite ist. Ist diese sehr gering (< 0.5) kann das darauf hindeuten, dass der Umfragenteilnehmer einfach ohne aufmerksamens Lesen die gleichen Antworten pro Item angekreuzt hat.
 Dabei haben wir die Items so sortiert wie sie pro Seite randomisiert angezeigt wurden in der Umfrage, um den Straightlining-Check pro Seite durchzuführen.
 ```{r straightlining-check}
@@ -325,7 +332,7 @@ ggplot(ki_tools_summary, aes(x = reorder(tool, n_gewaehlt), y = n_gewaehlt)) +
   ) +
   theme_minimal(base_size = 13)
 
-# KI-Tools die bei "Sonstiges" genannt wurden 
+# KI-Tools die bei "Sonstiges" genannt wurden
 df_clean |>
   filter(!is.na(A203_11a)) |>
   count(A203_11a, sort = TRUE)
@@ -396,9 +403,9 @@ df_clean <- df_clean |>
   mutate(A206_aiexperience_curr = factor(A206, levels = 1:5, labels = experience_labels)) %>%
   mutate(A207_aifrequency = factor(A207, levels = 1:5, labels = frequency_labels)) %>%
   mutate(A208_aipurpose = factor(A208, levels = 1:3, labels = purpose_labels))
-  
- # absolute Häufigkeiten bestimmen 
-df_clean |> count(A205_aiexperience_allg) 
+
+ # absolute Häufigkeiten bestimmen
+df_clean |> count(A205_aiexperience_allg)
 df_clean |> count(A206_aiexperience_curr)
 df_clean |> count(A207_aifrequency)
 df_clean |> count(A208_aipurpose)
@@ -678,26 +685,27 @@ Vor der obigen Berechnung wurden zwei Items aus ihren Konstrukten entfernt, da s
 
 **IQD und CP** unterschreiten die AVE-Grenze von 0,50 zwar weiterhin knapp, gelten aber nach **Fornell & Larcker (1981)** dennoch als ausreichend valide: Liegt die Composite Reliability klar über 0,70 (IQD: CR = 0,724; CP: CR = 0,772), kompensiert dies ein nur geringfügig unter 0,50 liegendes AVE (IQD: 0,48; CP: 0,49).
 
-**SQD, DIS und PI** bleiben demgegenüber als echte Limitationen bestehen: Bei SQD und DIS unterschreiten sowohl CR als auch AVE die Grenzwerte deutlich (generell schwache Itemkorrelationen; bei nur drei Items je Konstrukt ist eine weitere Item-Entfernung nicht sinnvoll möglich). Bei PI liegt die Ursache nicht in den Items selbst – isoliert betrachtet erfüllen PI1–PI3 die Gütekriterien deutlich –, sondern vermutlich in der hohen Zahl an Prädiktoren auf SI (13 Pfade bei vergleichsweise kleiner Stichprobe), die die PLS-Schätzung destabilisiert. Diese drei Konstrukte sollten bei der Interpretation der Strukturmodellergebnisse aus Block 5 entsprechend vorsichtig behandelt werden.
+**SQD, DIS und PI** bleiben demgegenüber als echte Limitationen bestehen: Bei SQD und DIS unterschreiten sowohl CR als auch AVE die Grenzwerte deutlich (generell schwache Itemkorrelationen; bei nur drei Items je Konstrukt ist eine weitere Item-Entfernung nicht sinnvoll möglich). Bei PI liegt die Ursache nicht in den Items selbst – isoliert betrachtet erfüllen PI1–PI3 die Gütekriterien deutlich –, sondern vermutlich in der Gesamtkomplexität des Strukturmodells bei vergleichsweise kleiner Stichprobe, die die PLS-Schätzung destabilisiert. Da diese Version des Modells ohne Moderationspfade auskommt (nur noch 6 statt 13 Prädiktoren auf SI), lässt sich hier direkt prüfen, ob sich die Stabilität dadurch verbessert – siehe Block 5. Diese drei Konstrukte sollten bei der Interpretation der Strukturmodellergebnisse dennoch vorsichtig behandelt werden.
 
 # 5. PLS-SEM
 
 Das Strukturmodell folgt dem Push-Pull-Mooring-Rahmen: IQD, SQD und PR wirken auf DIS
 (Dissatisfaction/"Push"), DIS, PI, CP, HAB, AA und SN wirken auf SI (Switching Intention,
-"Pull"/"Mooring"), und SI wirkt auf BI (Behavioral Intention). Die allgemeine KI-Erfahrung
-(A205) wird als Moderator für alle sechs Pfade auf SI spezifiziert: DIS→SI (H6a), HAB→SI (H6b),
-AA→SI (H6c), SN→SI (H6d), PI→SI (H6e) und CP→SI (H6f). Da A205 ein Einzelitem ist, wird es als
-Single-Item-Konstrukt (`composite()` mit `single_item()`) modelliert – dem in `seminr`
-vorgesehenen Standardvorgehen für Moderatoren, die nur aus einer einzelnen Variable bestehen.
-Wichtig: Ein Moderator muss im Strukturmodell immer zusätzlich zu den Interaktionstermen als
-eigener Haupteffekt-Pfad spezifiziert werden (hier `EXP -> SI`) – fehlt dieser Haupteffekt,
-bricht die interne f²-Berechnung von `seminr` mit einem "subscript out of bounds"-Fehler ab,
-da die Pfadkoeffizienten-Matrix dann keine Zeile für den Moderator enthält.
+"Pull"/"Mooring"), und SI wirkt auf BI (Behavioral Intention).
 
-## 5.1 Strukturmodell und Moderator spezifizieren
+**Hinweis zu dieser Modellversion:** Dies ist die schlankere Version des Modells **ohne**
+den Moderator „KI-Erfahrung" (EXP) und ohne die sechs Interaktionsterme. In der
+ursprünglichen Version (`Auswertung_Umfrage_Teamprojekt.Rmd`) war keine der sechs
+Moderationshypothesen statistisch signifikant, und das Bootstrapping war durch die hohe
+Prädiktorenzahl auf SI (13 Pfade) stark instabil (nur ca. 40–45% konvergierte
+Wiederholungen bei nboot=1000, nboot=5000 brach sogar komplett ab). Diese Version prüft,
+ob das Entfernen der Moderation die Stabilität der Schätzung sowie die Aussagekraft der
+verbleibenden Haupteffekt-Pfade verbessert.
 
-```{r sm-full-mit-moderation}
-measurement_model_mod <- constructs(
+## 5.1 Strukturmodell spezifizieren
+
+```{r strukturmodell-spezifikation}
+measurement_model_final <- constructs(
   reflective("IQD", multi_items("IQD", c(1, 3, 4))),
   reflective("SQD", multi_items("SQD", 1:3)),
   reflective("PR",  multi_items("PR",  1:4)),
@@ -708,21 +716,12 @@ measurement_model_mod <- constructs(
   reflective("AA",  multi_items("AA",  1:4)),
   reflective("SN",  multi_items("SN",  1:3)),
   reflective("SI",  multi_items("SI",  1:3)),
-  reflective("BI",  multi_items("BI",  1:3)),
-  composite("EXP", single_item("A205")),                                # Moderator: KI-Erfahrung
-  interaction_term(iv = "DIS", moderator = "EXP", method = orthogonal), # H6a
-  interaction_term(iv = "HAB", moderator = "EXP", method = orthogonal), # H6b
-  interaction_term(iv = "AA",  moderator = "EXP", method = orthogonal), # H6c
-  interaction_term(iv = "SN",  moderator = "EXP", method = orthogonal), # H6d
-  interaction_term(iv = "PI",  moderator = "EXP", method = orthogonal), # H6e
-  interaction_term(iv = "CP",  moderator = "EXP", method = orthogonal)  # H6f
+  reflective("BI",  multi_items("BI",  1:3))
 )
 
 structural_model <- relationships(
   paths(from = c("IQD", "SQD", "PR"), to = "DIS"),
-  paths(from = c("DIS", "PI", "CP", "HAB", "AA", "SN", "EXP",
-                  "DIS*EXP", "HAB*EXP", "AA*EXP", "SN*EXP",
-                  "PI*EXP", "CP*EXP"), to = "SI"),
+  paths(from = c("DIS", "PI", "CP", "HAB", "AA", "SN"), to = "SI"),
   paths(from = "SI", to = "BI")
 )
 ```
@@ -732,7 +731,7 @@ structural_model <- relationships(
 ```{r pls-schaetzen}
 pls_model <- estimate_pls(
   data              = df_clean,
-  measurement_model = measurement_model_mod,
+  measurement_model = measurement_model_final,
   structural_model  = structural_model
 )
 
@@ -742,12 +741,11 @@ summary_pls$paths
 
 ```{r bootstrapping, cache=TRUE}
 # ── BOOTSTRAPPING MIT 1000 WIEDERHOLUNGEN ────────────────────────────────────
-# nboot auf 1000 reduziert (statt 5000): Bei 5000 Wiederholungen bricht die
-# Berechnung mit einem Fehler ab, da bei diesem instabilen Modell (siehe
-# Hinweistext zu Block 4) ein sehr hoher Anteil der Wiederholungen nicht
-# konvergiert. 1000 Wiederholungen sind in der PLS-SEM-Literatur ebenfalls
-# ein anerkannter Standardwert und laufen bei diesem Modell nachweislich
-# stabil durch.
+# nboot vorerst bei 1000 belassen (wie in der Version mit Moderation), da dieses
+# schlankere Modell noch nicht separat auf Konvergenzstabilität getestet wurde.
+# Da SI hier aber nur noch 6 statt 13 Prädiktoren hat, ist zu erwarten, dass die
+# Konvergenzquote deutlich besser ausfällt und ggf. auch nboot=5000 wieder
+# funktioniert - das sollte nach dem ersten Durchlauf geprüft werden.
 set.seed(42)
 boot_model <- bootstrap_model(
   seminr_model = pls_model,
@@ -758,13 +756,6 @@ boot_model <- bootstrap_model(
 
 summary_boot <- summary(boot_model, alpha = 0.05)
 ```
-
-**Hinweis zur Konvergenzquote:** Bei diesem Bootstrapping konvergierten nur ca. 40–45%
-der 1000 Wiederholungen; nicht-konvergierte Iterationen wurden von `seminr` automatisch
-ausgeschlossen. Dies ist ein weiterer konkreter Beleg für die in Block 4 beschriebene
-Instabilität des Strukturmodells (vermutlich bedingt durch die hohe Zahl an – teils
-korrelierten – Prädiktoren auf SI bei vergleichsweise kleiner Stichprobe) und sollte bei
-der Interpretation der Pfadkoeffizienten berücksichtigt werden.
 
 ## 5.3 Pfadkoeffizienten, t-Werte, p-Werte, R² und f²
 
@@ -808,13 +799,6 @@ f2_pairs <- tribble(
   "HAB",       "SI",
   "AA",        "SI",
   "SN",        "SI",
-  "EXP",       "SI", #Experience als Moderator
-  "DIS*EXP",   "SI",
-  "HAB*EXP",   "SI",
-  "AA*EXP",    "SI",
-  "SN*EXP",    "SI",
-  "PI*EXP",    "SI",
-  "CP*EXP",    "SI",
   "SI",        "BI"
 )
 
@@ -860,12 +844,6 @@ hypothesis_table <- tribble(
   "H5", "HAB  ->  SI",
   "H2a", "AA  ->  SI",
   "H2b", "SN  ->  SI",
-  "H6a", "DIS*EXP  ->  SI",
-  "H6b", "HAB*EXP  ->  SI",
-  "H6c", "AA*EXP  ->  SI",
-  "H6d", "SN*EXP  ->  SI",
-  "H6e", "PI*EXP  ->  SI",
-  "H6f", "CP*EXP  ->  SI",
   "H7",  "SI  ->  BI"
 ) |>
   left_join(path_coefficients, by = "Pfad") |>
@@ -874,103 +852,7 @@ hypothesis_table <- tribble(
 hypothesis_table
 ```
 
-**Anmerkung zu den Moderationseffekten:** Keine der sechs Moderationshypothesen (H6a–H6f)
-ist statistisch signifikant (p-Werte zwischen 0,44 und 0,94). In Kombination mit der oben
-dokumentierten Konvergenzproblematik beim Bootstrapping (nur ca. 40–45% konvergierte
-Wiederholungen) ist dies ein weiteres Indiz für die Überparametrisierung des Strukturmodells
-(13 Prädiktoren auf SI bei kleiner Stichprobe). Aus diesem Grund wurde zusätzlich ein
-separates, schlankeres Modell **ohne** die Moderationspfade (EXP und alle sechs
-Interaktionsterme) gerechnet (`Auswertung_Umfrage_Teamprojekt_ohne_Moderation.Rmd`). Das
-Ergebnis: Die Konvergenzquote blieb praktisch unverändert (597 statt 598 von 1000
-Wiederholungen fehlgeschlagen), es wurde keine zusätzliche Hypothese signifikant, und R²
-für SI sank sogar leicht. Die Instabilität liegt also vermutlich weniger an der reinen
-Prädiktorenzahl als an der Kombination aus kleiner Stichprobe und einzelnen schwachen
-Kernkonstrukten (siehe Fazit am Ende von Block 5 der genannten Datei).
-
-## 5.5 Moderationsanalyse: KI-Erfahrung (EXP)
-
-Die formalen Signifikanztests für die Moderationseffekte (H6a–H6f) sind Teil der
-Hypothesentabelle oben (Pfade `DIS*EXP -> SI`, `PI*EXP -> SI`, `CP*EXP -> SI`,
-`HAB*EXP -> SI`, `AA*EXP -> SI`, `SN*EXP -> SI`). Zur inhaltlichen Illustration wird
-zusätzlich ein Mediansplit der KI-Erfahrung (A205) in "niedrige" vs. "hohe KI-Erfahrung"
-visualisiert (nur zur Veranschaulichung – der statistische Test selbst erfolgt kontinuierlich
-über den orthogonalen Interaktionsterm). Das Konfidenzband um die Regressionsgeraden ist
-**schraffiert dargestellt, wenn der zugehörige Moderationseffekt signifikant ist**
-(p < 0.05 laut Hypothesentabelle), sonst als einfaches transparentes Band – so ist auf
-einen Blick erkennbar, welche der sechs Moderationen tatsächlich statistisch abgesichert sind.
-**Vorab als kurzer Spoiler:** Keiner der sechs Moderationseffekte ist statistisch signifikant –
-in keiner der folgenden Grafiken wird daher ein schraffiertes Konfidenzband zu sehen sein.
-
-```{r moderation-illustration, fig.width=8}
-df_clean <- df_clean |>
-  mutate(EXP_gruppe = ifelse(A205 < median(A205, na.rm = TRUE),
-                              "niedrige KI-Erfahrung", "hohe KI-Erfahrung"))
-
-farben_exp <- c("hohe KI-Erfahrung" = "#2E5F8A", "niedrige KI-Erfahrung" = "#9CC1E0")
-
-moderation_plot <- function(prediktor, ziel, titel, signifikant) {
-  # ── Regressionsgerade + Konfidenzband je Gruppe manuell berechnen ────────────
-  fit_data <- df_clean |>
-    group_by(EXP_gruppe) |>
-    reframe({
-      modell <- lm(reformulate(prediktor, ziel), data = pick(everything()))
-      x_seq  <- seq(min(.data[[prediktor]], na.rm = TRUE),
-                     max(.data[[prediktor]], na.rm = TRUE), length.out = 50)
-      neu    <- setNames(data.frame(x_seq), prediktor)
-      vorhersage <- predict(modell, newdata = neu, interval = "confidence")
-      tibble(x = x_seq, y = vorhersage[, "fit"],
-             ymin = vorhersage[, "lwr"], ymax = vorhersage[, "upr"])
-    })
-
-  p <- ggplot() +
-    geom_point(data = df_clean,
-               aes(x = .data[[prediktor]], y = .data[[ziel]], color = EXP_gruppe),
-               alpha = 0.6)
-
-  if (signifikant) {
-    p <- p + geom_ribbon_pattern(
-      data = fit_data, aes(x = x, ymin = ymin, ymax = ymax,
-                            fill = EXP_gruppe, pattern_fill = EXP_gruppe),
-      alpha = 0.25, pattern = "stripe", pattern_density = 0.15,
-      pattern_spacing = 0.02, pattern_angle = 45, color = NA, show.legend = FALSE
-    )
-  } else {
-    p <- p + geom_ribbon(
-      data = fit_data, aes(x = x, ymin = ymin, ymax = ymax, fill = EXP_gruppe),
-      alpha = 0.15, color = NA, show.legend = FALSE
-    )
-  }
-
-  p +
-    geom_line(data = fit_data, aes(x = x, y = y, color = EXP_gruppe), linewidth = 1) +
-    scale_color_manual(values = farben_exp, name = "KI-Erfahrung (A205)") +
-    scale_fill_manual(values = farben_exp, guide = "none") +
-    labs(title = titel, x = paste(prediktor, "(Skalenmittelwert)"),
-         y = paste(ziel, "(Skalenmittelwert)")) +
-    theme_minimal(base_size = 13)
-}
-
-moderations_illustration <- tribble(
-  ~Praediktor, ~Hypothese,
-  "DIS", "H6a",
-  "HAB", "H6b",
-  "AA",  "H6c",
-  "SN",  "H6d",
-  "PI",  "H6e",
-  "CP",  "H6f"
-)
-
-for (i in seq_len(nrow(moderations_illustration))) {
-  prad  <- moderations_illustration$Praediktor[i]
-  hypo  <- moderations_illustration$Hypothese[i]
-  sig   <- (hypothesis_table |> filter(Hypothese == hypo) |> pull(p_Wert)) < 0.05
-  titel <- paste0("Moderationseffekt ", hypo, ": ", prad, " -> SI nach KI-Erfahrung",
-                   ifelse(sig, " (signifikant)", ""))
-  print(moderation_plot(prad, "SI", titel, sig))
-}
-```
-
-## 5.6 Pfaddiagramm
+## 5.5 Pfaddiagramm
 
 ```{r pfaddiagramm, fig.width=10, fig.height=8}
 # Hinweis: seminr_theme_create() akzeptiert für Knoten-/Kantenfarben nur benannte
@@ -989,5 +871,31 @@ pfad_theme <- seminr_theme_create(
 )
 
 plot(boot_model, theme = pfad_theme,
-     title = "PLS-SEM Strukturmodell mit Pfadkoeffizienten und Signifikanzkennzeichnung")
+     title = "PLS-SEM Strukturmodell ohne Moderation mit Pfadkoeffizienten und Signifikanzkennzeichnung")
 ```
+
+## 5.6 Fazit: Hat das Entfernen der Moderation etwas gebracht?
+
+In Block 4 wurde vermutet, dass die Instabilität des Strukturmodells (insbesondere bei PI)
+mit der hohen Prädiktorenzahl auf SI zusammenhängen könnte, und dass diese schlankere
+Version (6 statt 13 Prädiktoren auf SI) das prüfen soll. Der direkte Vergleich mit der
+ursprünglichen Version (`Auswertung_Umfrage_Teamprojekt.Rmd`) zeigt: **Nein, es hat kaum
+etwas gebracht.**
+
+- **Konvergenzquote beim Bootstrapping:** 597 von 1000 Wiederholungen sind auch hier
+  fehlgeschlagen – praktisch identisch zu den 598 von 1000 in der Version mit Moderation.
+- **Signifikante Hypothesen:** Wie zuvor ist nur H7 (SI → BI) signifikant, keine weitere
+  Hypothese wurde durch die Vereinfachung signifikant.
+- **R² für SI:** Sank sogar leicht von 0,776 (mit Moderation) auf 0,723 (ohne), da weniger
+  Prädiktoren logischerweise weniger Varianz erklären.
+- **Zusätzlich auffällig:** Einzelne Pfade wechseln zwischen den beiden Modellversionen das
+  Vorzeichen (z. B. PI → SI: -0,30 → +0,38; HAB → SI: +0,78 → -0,09), was auf grundsätzlich
+  instabile Schätzungen hindeutet, unabhängig von der Moderation.
+
+**Einordnung:** Die Instabilität liegt damit vermutlich weniger an der reinen Anzahl der
+Prädiktoren auf SI, sondern eher an der Kombination aus kleiner Stichprobe (~76–100
+Personen) und den in Block 4 dokumentierten schwachen Kernkonstrukten (SQD, DIS) sowie der
+generellen PLSc-Schätzung bei so einem komplexen 11-Konstrukt-Modell. Das Entfernen der
+Moderation war ein nachvollziehbarer Versuch, das Grundproblem aber offenbar nicht
+behebt – dies ist dennoch ein relevantes, ehrliches Ergebnis für die Gesamtinterpretation
+beider Modellversionen.
